@@ -1,5 +1,6 @@
 #pragma once
 
+#include "card_items.h"
 #include "page_base.h"
 #include "page_items.h"
 #include "page_visitor.h"
@@ -10,6 +11,19 @@
 
 namespace esphome {
 namespace nspanel_lovelace {
+
+/*
+ * =============== ScreensaverEntityItem ===============
+ */
+
+class ScreensaverEntityItem : public EntitiesCardEntityItem {
+public:
+  using EntitiesCardEntityItem::EntitiesCardEntityItem;
+
+protected:
+  // output: ~~icon~iconColor~displayName~value
+  std::string &render_(std::string &buffer) override;
+};
 
 /*
  * =============== Screensaver ===============
@@ -35,7 +49,8 @@ public:
     }
     return false;
   }
-  
+  bool has_entity_item(const std::string &entity_id);
+
   const char *get_render_instruction() const override { return "weatherUpdate"; };
   std::string &render(std::string &buffer) override;
 

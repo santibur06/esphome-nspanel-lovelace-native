@@ -137,6 +137,8 @@ CONF_SCREENSAVER_STATUS_ICON_RIGHT = "status_icon_right"
 CONF_SCREENSAVER_STATUS_ICON_ALT_FONT = "alt_font" # todo: to_code
 CONF_SCREENSAVER_DOUBLE_TAP_TO_UNLOCK = "double_tap_to_unlock"
 CONF_SCREENSAVER_FORECAST_METHOD = "forecast_method"
+CONF_SCREENSAVER_MAIN_ENTITY = "main_entity"
+CONF_SCREENSAVER_EXTRA_ENTITY = "extra_entity"
 
 CONF_CARDS = "cards"
 CONF_CARD_TYPE = "type"
@@ -144,6 +146,7 @@ CONF_CARD_HIDDEN = "hidden"
 CONF_CARD_TITLE = "title"
 CONF_CARD_ENTITIES = "entities"
 CONF_CARD_ENTITIES_NAME = "name"
+CONF_CARD_ENTITIES_ASSUMED_STATE = "assumed_state"
 
 CARD_ENTITIES="cardEntities"
 CARD_GRID="cardGrid"
@@ -158,6 +161,7 @@ CONF_CARD_QR_TEXT = "qr_text"
 CONF_CARD_ALARM_ENTITY_ID = "alarm_entity_id"
 CONF_CARD_ALARM_SUPPORTED_MODES = "supported_modes"
 CONF_CARD_THERMO_ENTITY_ID = "thermo_entity_id"
+CONF_CARD_THERMO_SUPPORTED_MODES = "supported_modes"
 CONF_CARD_MEDIA_ENTITY_ID = "media_entity_id"
 
 def load_icons():
@@ -332,6 +336,12 @@ SCHEMA_STATUS_ICON = cv.Schema({
     cv.Optional(CONF_SCREENSAVER_STATUS_ICON_ALT_FONT): cv.boolean,
 })
 
+SCHEMA_SCREENSAVER_ENTITY = cv.Schema({
+    cv.Required(CONF_ENTITY_ID): valid_entity_id(),
+    cv.Optional(CONF_CARD_ENTITIES_NAME, default=""): cv.string,
+    cv.Optional(CONF_ICON): SCHEMA_ICON,
+})
+
 SCHEMA_SCREENSAVER = cv.Schema({
     cv.Optional(CONF_ID): valid_uuid,
     cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
@@ -344,12 +354,15 @@ SCHEMA_SCREENSAVER = cv.Schema({
     }),
     cv.Optional(CONF_SCREENSAVER_STATUS_ICON_LEFT): SCHEMA_STATUS_ICON,
     cv.Optional(CONF_SCREENSAVER_STATUS_ICON_RIGHT): SCHEMA_STATUS_ICON,
+    cv.Optional(CONF_SCREENSAVER_MAIN_ENTITY): SCHEMA_SCREENSAVER_ENTITY,
+    cv.Optional(CONF_SCREENSAVER_EXTRA_ENTITY): SCHEMA_SCREENSAVER_ENTITY,
 })
 
 SCHEMA_CARD_ENTITY = cv.Schema({
     cv.Required(CONF_ENTITY_ID): valid_entity_id(),
     cv.Optional(CONF_CARD_ENTITIES_NAME): cv.string,
     cv.Optional(CONF_ICON): SCHEMA_ICON,
+    cv.Optional(CONF_CARD_ENTITIES_ASSUMED_STATE, default=False): cv.boolean,
 })
 
 SCHEMA_CARD_BASE = cv.Schema({
@@ -392,6 +405,11 @@ def validate_config(config):
 
     if CONF_DEFAULT_CARD in config and card_ids.get(config[CONF_DEFAULT_CARD]) is None:
         raise cv.Invalid(f"Cannot find a card with the id '{config[CONF_DEFAULT_CARD]}'", [CONF_DEFAULT_CARD])
+
+    screensaver_config = config.get(CONF_SCREENSAVER, {})
+    for key in [CONF_SCREENSAVER_MAIN_ENTITY, CONF_SCREENSAVER_EXTRA_ENTITY]:
+        if key in screensaver_config:
+            add_entity_id(screensaver_config[key][CONF_ENTITY_ID])
 
     for i, card_config in enumerate(config.get(CONF_CARDS, [])):
         err_path = [CONF_CARDS, i]
@@ -486,7 +504,8 @@ CONFIG_SCHEMA = cv.All(
                         )
                 }),
                 CARD_THERMO: SCHEMA_CARD_BASE.extend({
-                    cv.Required(CONF_CARD_THERMO_ENTITY_ID): valid_entity_id(['climate'])
+                    cv.Required(CONF_CARD_THERMO_ENTITY_ID): valid_entity_id(['climate']),
+                    cv.Optional(CONF_CARD_THERMO_SUPPORTED_MODES): cv.ensure_list(cv.string_strict),
                 }),
                 CARD_MEDIA: SCHEMA_CARD_BASE.extend({
                     cv.Optional(CONF_CARD_ENTITIES): cv.ensure_list(SCHEMA_CARD_ENTITY),
@@ -520,6 +539,7 @@ DeleteItem = nspanel_lovelace_ns.class_("DeleteItem")
 NavigationItem = nspanel_lovelace_ns.class_("NavigationItem")
 StatusIconItem = nspanel_lovelace_ns.class_("StatusIconItem")
 WeatherItem = nspanel_lovelace_ns.class_("WeatherItem")
+ScreensaverEntityItem = nspanel_lovelace_ns.class_("ScreensaverEntityItem")
 EntitiesCardEntityItem = nspanel_lovelace_ns.class_("EntitiesCardEntityItem")
 GridCardEntityItem = nspanel_lovelace_ns.class_("GridCardEntityItem")
 AlarmButtonItem = nspanel_lovelace_ns.class_("AlarmButtonItem")
@@ -596,6 +616,9 @@ def gen_card_entities(entities_config, card_class: cg.MockObjClass, card_variabl
 
         generate_icon_config(entity_config.get(CONF_ICON, None), entity_class)
 
+        if entity_config.get(CONF_CARD_ENTITIES_ASSUMED_STATE, False):
+            cg.add(entity_class.set_assumed_state(True))
+
         cg.add(card_variable.add_item(entity_class))
 
 def get_status_icon_statement(icon_config, icon_class: cg.MockObjClass, default_icon_value: str = 'alert-circle-outline'):
@@ -613,6 +636,17 @@ def get_status_icon_statement(icon_config, icon_class: cg.MockObjClass, default_
         return cg.RawStatement(f'{basicstr}, {default_icon_value}, {attrs["color"]}u)')
     else:
         return cg.RawStatement(f'{basicstr}, {default_icon_value})')
+
+def gen_screensaver_entity(entity_config, variable_name: str) -> cg.MockObjClass:
+    entity_class = cg.global_ns.class_(variable_name)
+    entity_class.op = "->"
+    entity_id = get_entity_id(entity_config[CONF_ENTITY_ID])
+    display_name = entity_config[CONF_CARD_ENTITIES_NAME]
+    cg.add(cg.RawExpression(
+        f"auto {variable_name} = "
+        f"{make_shared.template(ScreensaverEntityItem).__call__(get_new_uuid(), entity_id, display_name)}"))
+    generate_icon_config(entity_config.get(CONF_ICON, None), entity_class)
+    return entity_class
 
 async def to_code(config):
     # note: not using 'psram' dependency because our sdkconfig options conflict
@@ -794,9 +828,17 @@ async def to_code(config):
                         "Please use forecast_method 'service' instead (see the README for the required HA automation template)."
                     )
             screensaver_items = []
-            # 1 main weather item + 4 forecast items
-            for i in range(0,5):
+            # 1 main item (weather or HA entity) + 4 forecast items + optional extra HA entity
+            if CONF_SCREENSAVER_MAIN_ENTITY in screensaver_config:
+                screensaver_items.append(gen_screensaver_entity(
+                    screensaver_config[CONF_SCREENSAVER_MAIN_ENTITY], screensaver_info[0] + "_main"))
+            else:
                 screensaver_items.append(make_shared.template(screensaver_info[3]).__call__(get_new_uuid()))
+            for i in range(1,5):
+                screensaver_items.append(make_shared.template(screensaver_info[3]).__call__(get_new_uuid()))
+            if CONF_SCREENSAVER_EXTRA_ENTITY in screensaver_config:
+                screensaver_items.append(gen_screensaver_entity(
+                    screensaver_config[CONF_SCREENSAVER_EXTRA_ENTITY], screensaver_info[0] + "_extra"))
             cg.add(screensaver_class.add_item_range(screensaver_items))
 
         cg.add(cg.RawStatement("}"))
@@ -813,9 +855,17 @@ async def to_code(config):
     visible_card_count = len(visible_card_uuids)
     visible_index = 0
 
+    parent_card_uuids = {}
+    for i, card_config in enumerate(config.get(CONF_CARDS, [])):
+        for entity_config in card_config.get(CONF_CARD_ENTITIES, []):
+            entity_id = entity_config.get(CONF_ENTITY_ID, "")
+            if entity_id.startswith("navigate."):
+                parent_card_uuids.setdefault(entity_id.split(".", 1)[1], card_uuids[i])
+
     prev_card_uuid = next_card_uuid = None
     navleft_icon_value = get_icon(get_icon_hex("arrow-left-bold"))
     navhome_icon_value = get_icon(get_icon_hex("home"))
+    navup_icon_value = get_icon(get_icon_hex("arrow-up-bold"))
     navright_icon_value = get_icon(get_icon_hex("arrow-right-bold"))
     for i, card_config in enumerate(config.get(CONF_CARDS, [])):
         cg.add(cg.RawStatement("{"))
@@ -877,9 +927,12 @@ async def to_code(config):
             home_uuid = screensaver_uuid
             if screensaver_uuid is None:
                 home_uuid = visible_card_uuids[0] if visible_card_count > 0 else None
-            if home_uuid != None:
+            parent_uuid = parent_card_uuids.get(card_config.get(CONF_ID))
+            if parent_uuid != None or home_uuid != None:
                 navleft_variable = card_variable + "_navhome"
-                navleft_statement = cg.RawStatement(f'new {NavigationItem}(\"{get_new_uuid()}\", \"{home_uuid}\", {navhome_icon_value})')
+                navleft_uuid = parent_uuid if parent_uuid != None else home_uuid
+                navleft_icon = navup_icon_value if parent_uuid != None else navhome_icon_value
+                navleft_statement = cg.RawStatement(f'new {NavigationItem}(\"{get_new_uuid()}\", \"{navleft_uuid}\", {navleft_icon})')
                 cg.add(cg.RawExpression(
                     f"auto {navleft_variable} = "
                     f"{unique_ptr.template(NavigationItem)}({navleft_statement})"))
@@ -908,6 +961,9 @@ async def to_code(config):
         elif card_config[CONF_CARD_TYPE] == CARD_ALARM:
             for mode in card_config[CONF_CARD_ALARM_SUPPORTED_MODES]:
                 cg.add(card_class.add_arm_button(ALARM_ARM_ACTION.class_(mode)))
+        elif card_config[CONF_CARD_TYPE] == CARD_THERMO:
+            for mode in card_config.get(CONF_CARD_THERMO_SUPPORTED_MODES, []):
+                cg.add(card_class.add_supported_mode(mode))
 
         gen_card_entities(
             card_config.get(CONF_CARD_ENTITIES, []), 

@@ -2389,9 +2389,12 @@ void NSPanelLovelace::on_entity_attribute_update_(
     auto page = this->page_mgr_.current_page();
     if (!page) return;
 
-    if (this->screensaver_ != nullptr && 
+    if (this->screensaver_ != nullptr &&
         page->is_type(page_type::screensaver)) {
-      force_current_page_update_ = 
+      if (this->screensaver_->has_entity_item(entity_id)) {
+        this->send_weather_update_command_();
+      }
+      force_current_page_update_ =
         this->screensaver_->should_render_status_update(entity_id);
       return;
     }

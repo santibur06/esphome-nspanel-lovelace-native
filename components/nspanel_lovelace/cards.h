@@ -128,11 +128,15 @@ public:
   void accept(PageVisitor& visitor) override;
 
   void configure_temperature_unit();
+  void add_supported_mode(const std::string &mode) {
+    this->supported_modes_.push_back(mode);
+  }
 
   std::string &render(std::string &buffer) override;
 
 protected:
   std::shared_ptr<Entity> thermo_entity_;
+  std::vector<std::string> supported_modes_;
   const icon_char_t* temperature_unit_icon_;
 };
 

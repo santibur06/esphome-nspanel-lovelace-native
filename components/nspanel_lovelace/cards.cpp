@@ -317,15 +317,18 @@ std::string &ThermoCard::render(std::string &buffer) {
     std::stof(this->thermo_entity_->get_attribute(
       ha_attr_type::target_temp_step, "0.5")) * 10)));
   
-  //TODO: add overwrite_supported_modes
-  auto& hvac_modes_str = 
+  auto& hvac_modes_str =
     this->thermo_entity_->get_attribute(ha_attr_type::hvac_modes);
-  if (hvac_modes_str.empty()) {
+  if (this->supported_modes_.empty() && hvac_modes_str.empty()) {
     buffer.append(4 * 8, SEPARATOR);
   } else {
     std::vector<std::string> hvac_modes;
-    hvac_modes.reserve(6);
-    split_str(',', hvac_modes_str, hvac_modes);
+    if (!this->supported_modes_.empty()) {
+      hvac_modes = this->supported_modes_;
+    } else {
+      hvac_modes.reserve(6);
+      split_str(',', hvac_modes_str, hvac_modes);
+    }
 
     for (auto& mode : hvac_modes) {
       uint16_t active_colour = 64512U; //dark orange

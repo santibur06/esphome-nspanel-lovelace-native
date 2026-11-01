@@ -7,10 +7,32 @@ namespace esphome {
 namespace nspanel_lovelace {
 
 /*
+ * =============== ScreensaverEntityItem ===============
+ */
+
+std::string &ScreensaverEntityItem::render_(std::string &buffer) {
+  // skip: type,internalName
+  buffer.append(2, SEPARATOR);
+  PageItem_Icon::render_(buffer).append(1, SEPARATOR);
+  PageItem_DisplayName::render_(buffer).append(1, SEPARATOR);
+  return PageItem_Value::render_(buffer);
+}
+
+/*
  * =============== Screensaver ===============
  */
 
 void Screensaver::accept(PageVisitor& visitor) { visitor.visit(*this); }
+
+bool Screensaver::has_entity_item(const std::string &entity_id) {
+  for (auto &item : this->items_) {
+    auto stateful_item = page_item_cast<StatefulPageItem>(item.get());
+    if (stateful_item != nullptr && stateful_item->get_entity_id() == entity_id) {
+      return true;
+    }
+  }
+  return false;
+}
 
 void Screensaver::set_icon_left(std::shared_ptr<StatusIconItem> left_icon) {
   this->left_icon = std::move(left_icon);

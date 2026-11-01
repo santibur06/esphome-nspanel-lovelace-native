@@ -202,9 +202,13 @@ public:
     return this->entity_->get_attribute(attr, default_value);
   }
   Entity* get_entity() const { return this->entity_.get(); }
+  bool get_assumed_state() const { return this->assumed_state_; }
+
+  void set_assumed_state(bool assumed_state) { this->assumed_state_ = assumed_state; }
 
 protected:
   const std::shared_ptr<Entity> entity_;
+  bool assumed_state_ = false;
   // A function which modifies the entity when the state changes
   std::function<void(StatefulPageItem *)> on_state_callback_;
   const char *render_type_;

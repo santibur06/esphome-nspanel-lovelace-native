@@ -170,9 +170,10 @@ void EntitiesCardEntityItem::state_cover_fn(StatefulPageItem *me) {
   // see: https://github.com/home-assistant/core/blob/dev/homeassistant/components/cover/__init__.py#L112
   // OPEN
   if (supported_features & 0b1) {
-    if (position != 100 && !((me_->is_state(entity_state::open) ||
+    if (me_->get_assumed_state() ||
+        (position != 100 && !((me_->is_state(entity_state::open) ||
         me_->is_state(entity_state::unknown)) &&
-        position_str.empty())) {
+        position_str.empty()))) {
       icon_up_status = true;
     }
     if (cover_icons_found)
@@ -187,9 +188,10 @@ void EntitiesCardEntityItem::state_cover_fn(StatefulPageItem *me) {
   me_->value_.append(1, '|');
   // CLOSE
   if (supported_features & 0b10) {
-    if (position != 0 && !((me_->is_state(entity_state::closed) ||
+    if (me_->get_assumed_state() ||
+        (position != 0 && !((me_->is_state(entity_state::closed) ||
         me_->is_state(entity_state::unknown)) &&
-        position_str.empty())) {
+        position_str.empty()))) {
       icon_down_status = true;
     }
     if (cover_icons_found)
