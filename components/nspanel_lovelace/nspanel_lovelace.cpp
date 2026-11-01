@@ -95,6 +95,13 @@ bool NSPanelLovelace::save_state_() {
 void NSPanelLovelace::setup() {
   this->default_baud_rate_ = this->parent_->get_baud_rate();
 
+#ifdef USE_NSPANEL_RUNTIME_LAYOUT
+  // Must happen before anything below reads the pages or subscribes to entities
+  this->load_stored_layout_();
+  this->register_service(&NSPanelLovelace::set_layout, "set_layout", {"layout"});
+  this->register_service(&NSPanelLovelace::report_layout_status, "report_layout_status");
+#endif
+
   this->restore_state_();
 
   // Create default and screensaver bookmarks if they doesn't exist.
@@ -356,6 +363,9 @@ void NSPanelLovelace::setup() {
 }
 
 void NSPanelLovelace::loop() {
+#ifdef USE_NSPANEL_RUNTIME_LAYOUT
+  this->loop_layout_status_();
+#endif
 #ifdef USE_NSPANEL_TFT_UPLOAD
   if (this->is_updating_ || this->reparse_mode_) {
     return;

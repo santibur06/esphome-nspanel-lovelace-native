@@ -102,6 +102,7 @@ public:
 
   void delete_page(size_t index);
   void delete_page(const std::string& uuid);
+  void clear();
 
 protected:
   size_t current_index_;

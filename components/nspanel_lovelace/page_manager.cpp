@@ -123,6 +123,12 @@ bool PageManager::bookmark_page(
   return bookmark_page(bookmark_id, i, overwrite);
 }
 
+void PageManager::clear() {
+  pages_.clear();
+  bookmarks_.clear();
+  current_index_ = 0;
+}
+
 void PageManager::delete_page(size_t index) {
   if (index >= pages_.size()) return;
 

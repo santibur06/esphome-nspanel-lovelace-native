@@ -1,5 +1,10 @@
 #pragma once
 
+#include "esphome/core/defines.h"
+#ifdef USE_NSPANEL_RUNTIME_LAYOUT
+#include "esphome/components/json/json_util.h"
+#endif
+
 #include "defines.h"
 
 #include <functional>
@@ -125,6 +130,12 @@ public:
   void set_weather_forecast_data(std::string forecast_json);
 #endif
   void set_weather_entity_id(const std::string &weather_entity_id) { this->weather_entity_id_ = weather_entity_id; }
+#ifdef USE_NSPANEL_RUNTIME_LAYOUT
+  void set_model(const std::string &model) { this->model_ = model; }
+  // Validates and stores a layout (json), then reboots to apply it. An empty value removes the stored layout.
+  void set_layout(std::string layout_json);
+  void report_layout_status();
+#endif
 
   bool get_double_tap_to_unlock() const { return this->double_tap_to_unlock_; }
   void set_double_tap_to_unlock(bool value) { this->double_tap_to_unlock_ = value; }
@@ -280,6 +291,19 @@ protected:
 #endif
   void send_weather_update_command_();
   std::string weather_entity_id_;
+#ifdef USE_NSPANEL_RUNTIME_LAYOUT
+  void load_stored_layout_();
+  bool validate_layout_(JsonObjectConst layout, std::string &error);
+  void build_layout_(JsonObjectConst layout);
+  void loop_layout_status_();
+
+  std::string model_{"eu"};
+  // 'config' when using the pages from the device configuration, otherwise 'stored'
+  std::string layout_source_{"config"};
+  std::string layout_error_;
+  uint32_t layout_hash_{0};
+  bool layout_status_connected_{false};
+#endif
   std::string language_;
 
   std::queue<std::string> command_queue_;

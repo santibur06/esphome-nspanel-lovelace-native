@@ -127,6 +127,7 @@ CONF_LOCALE = "locale"
 CONF_TEMPERATURE_UNIT = "temperature_unit"
 CONF_LANGUAGE = "language"
 
+CONF_RUNTIME_LAYOUT = "runtime_layout"
 CONF_SCREENSAVER = "screensaver"
 CONF_MODEL = "model"
 CONF_SCREENSAVER_DATE_FORMAT = "date_format"
@@ -471,6 +472,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_EXP_VERT_UI, default=False): cv.boolean,
         cv.Optional(CONF_MODEL, default='eu'): cv.one_of('eu', 'us-l', 'us-p'),
         cv.Optional(CONF_DEFAULT_CARD): cv.string_strict,
+        # Allow the screensaver and cards to be replaced without compiling (see set_layout)
+        cv.Optional(CONF_RUNTIME_LAYOUT, default=False): cv.boolean,
         cv.Optional(CONF_LOCALE, default={}): SCHEMA_LOCALE,
         cv.Optional(CONF_SCREENSAVER): SCHEMA_SCREENSAVER,
         cv.Optional(CONF_INCOMING_MSG): automation.validate_automation(
@@ -720,6 +723,13 @@ async def to_code(config):
         esp32.add_idf_sdkconfig_option(
             "CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY", True
         )
+
+    if config[CONF_RUNTIME_LAYOUT]:
+        if cv.Version.parse(ESPHOME_VERSION) < cv.Version(2025,7,0):
+            raise cv.Invalid(f"{CONF_RUNTIME_LAYOUT} requires ESPHome 2025.7.0 or newer")
+        cg.add_define("USE_API_CUSTOM_SERVICES")
+        cg.add_define("USE_NSPANEL_RUNTIME_LAYOUT")
+        cg.add(nspanel.set_model(config[CONF_MODEL]))
 
     if CONF_SCREENSAVER in config:
         cg.add(nspanel.set_display_timeout(config[CONF_SLEEP_TIMEOUT]))
