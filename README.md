@@ -34,6 +34,24 @@ The NSPanel has on-board PSRAM which this project makes use of automatically, wh
 - Icon colours need to be a 16-bit number (0-65535) representing a `rgb565` colour code. This website can be used to select your colour https://chrishewett.com/blog/true-rgb565-colour-picker/ - then you take the rgb565 hex value and convert it to a number (e.g. `#ce79` -> `52857`).
 
 
+## Runtime layouts
+
+Add `runtime_layout: true` to change the screensaver and cards without compiling or flashing:
+
+```yaml
+api:
+  custom_services: true
+
+nspanel_lovelace:
+  runtime_layout: true
+```
+
+The device then has a `set_layout` action that takes a JSON layout. It validates the layout, stores it in flash and reboots to apply it, replacing the `screensaver` and `cards` from your configuration. An empty value removes the stored layout, and the device goes back to its configuration. If a stored layout can't be used, the device also falls back to its configuration.
+
+The device reports what it's using with the `esphome.nspanel_lovelace_layout_status` event, so "Allow the device to perform Home Assistant actions" must be on in its ESPHome integration settings. Call `report_layout_status` to ask for it again.
+
+The [NSPanel Lovelace Layout Editor](https://github.com/santibur06/nspanel-lovelace-editor) lets you edit layouts from a sidebar page in Home Assistant. This option requires ESPHome 2025.7.0 or newer.
+
 # Help Needed!
 
 As much as I love embedded programming, I am unable to dedicate the time required to make this project great without the help of others.
