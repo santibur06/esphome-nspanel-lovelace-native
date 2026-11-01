@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "types.h"
+#include "esphome/core/helpers.h"
 
 namespace esphome {
 namespace nspanel_lovelace {
@@ -15,6 +16,14 @@ std::string &ScreensaverEntityItem::render_(std::string &buffer) {
   buffer.append(2, SEPARATOR);
   PageItem_Icon::render_(buffer).append(1, SEPARATOR);
   PageItem_DisplayName::render_(buffer).append(1, SEPARATOR);
+  if (this->is_state(entity_state::unavailable) || this->is_state(entity_state::unknown)) {
+    return buffer.append("--");
+  }
+  // the screensaver slots only fit a short value, numbers are shown with 1 decimal
+  auto number = parse_number<float>(this->value_);
+  if (number.has_value()) {
+    return buffer.append(str_snprintf("%.1f", 16, *number)).append(this->value_postfix_);
+  }
   return PageItem_Value::render_(buffer);
 }
 

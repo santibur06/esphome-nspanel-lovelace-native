@@ -1512,6 +1512,8 @@ void NSPanelLovelace::update_datetime(const datetime_mode mode, const char *date
     // todo: fetch from config before using default value
     if (datefmt.empty())
       datefmt = this->date_format_;
+    // '%-d' (day without leading zero) isn't supported by strftime on ESP-IDF
+    replace_first(datefmt, "%-d", std::to_string(now.day_of_month).c_str());
     auto timestr = now.strftime(datefmt);
 
     if (this->language_ == "en" || this->language_ == "en-GB") {

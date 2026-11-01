@@ -939,20 +939,22 @@ async def to_code(config):
                 cg.add(card_class.set_nav_left(cg.global_ns.class_(navleft_variable)))
         else:
             visible_index += 1
-            navleft_variable = card_variable + "_navleft"
-            navleft_statement = cg.RawStatement(f'new {NavigationItem}(\"{get_new_uuid()}\", \"{prev_card_uuid}\", {navleft_icon_value})')
-            cg.add(cg.RawExpression(
-                f"auto {navleft_variable} = "
-                # todo: esphome is escaping the icon value (e.g. u8"\uE598") due to cpp_string_escape, so having to build a raw statement instead.
-                # f"{unique_ptr.template(NavigationItem).__call__(NavigationItem.new(get_new_uuid(), prev_card_uuid, navleft_icon_value))}"))
-                f"{unique_ptr.template(NavigationItem)}({navleft_statement})"))
-            cg.add(card_class.set_nav_left(cg.global_ns.class_(navleft_variable)))
-            navright_variable = card_variable + "_navright"
-            navright_statement = cg.RawStatement(f'new {NavigationItem}(\"{get_new_uuid()}\", \"{next_card_uuid}\", {navright_icon_value})')
-            cg.add(cg.RawExpression(
-                f"auto {navright_variable} = "
-                f"{unique_ptr.template(NavigationItem)}({navright_statement})"))
-            cg.add(card_class.set_nav_right(cg.global_ns.class_(navright_variable)))
+            # a single visible card has nowhere to page to, so it gets no arrows
+            if visible_card_count > 1:
+                navleft_variable = card_variable + "_navleft"
+                navleft_statement = cg.RawStatement(f'new {NavigationItem}(\"{get_new_uuid()}\", \"{prev_card_uuid}\", {navleft_icon_value})')
+                cg.add(cg.RawExpression(
+                    f"auto {navleft_variable} = "
+                    # todo: esphome is escaping the icon value (e.g. u8"\uE598") due to cpp_string_escape, so having to build a raw statement instead.
+                    # f"{unique_ptr.template(NavigationItem).__call__(NavigationItem.new(get_new_uuid(), prev_card_uuid, navleft_icon_value))}"))
+                    f"{unique_ptr.template(NavigationItem)}({navleft_statement})"))
+                cg.add(card_class.set_nav_left(cg.global_ns.class_(navleft_variable)))
+                navright_variable = card_variable + "_navright"
+                navright_statement = cg.RawStatement(f'new {NavigationItem}(\"{get_new_uuid()}\", \"{next_card_uuid}\", {navright_icon_value})')
+                cg.add(cg.RawExpression(
+                    f"auto {navright_variable} = "
+                    f"{unique_ptr.template(NavigationItem)}({navright_statement})"))
+                cg.add(card_class.set_nav_right(cg.global_ns.class_(navright_variable)))
 
         # todo: create qr page specific function
         if card_config[CONF_CARD_TYPE] == CARD_QR:
