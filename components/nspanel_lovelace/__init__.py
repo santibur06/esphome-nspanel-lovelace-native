@@ -8,10 +8,13 @@ import logging
 from typing import Union
 import os, json
 
-from esphome.components import uart, time, esp32
+from esphome.components import uart, time, esp32, light, switch, binary_sensor, sensor
 from esphome.const import (
     __version__ as ESPHOME_VERSION,
+    CONF_DEFAULT_TRANSITION_LENGTH,
     CONF_ID,
+    CONF_OUTPUT_ID,
+    CONF_RESTORE_MODE,
     CONF_TRIGGER_ID,
     CONF_TIME_ID,
     CONF_ESPHOME,
@@ -23,7 +26,7 @@ DEPENDENCIES = ["uart", "time", "wifi", "api", "esp32", "json"]
 CONFLICTS_WITH = ["psram"]
 
 def AUTO_LOAD():
-    val = ["text_sensor", "json"]
+    val = ["text_sensor", "json", "light"]
     return val
 
 _LOGGER = logging.getLogger(__name__)
@@ -128,6 +131,14 @@ CONF_TEMPERATURE_UNIT = "temperature_unit"
 CONF_LANGUAGE = "language"
 
 CONF_RUNTIME_LAYOUT = "runtime_layout"
+CONF_PANEL_SETTINGS = "panel_settings"
+CONF_RELAYS = "relays"
+CONF_TEMPERATURE_SENSOR = "temperature_sensor"
+CONF_SWITCH = "switch"
+CONF_BUTTON = "button"
+CONF_LIGHT = "light"
+CONF_SCREEN_LIGHT = "screen_light"
+CONF_SCREENSAVER_LIGHT = "screensaver_light"
 CONF_SCREENSAVER = "screensaver"
 CONF_MODEL = "model"
 CONF_SCREENSAVER_DATE_FORMAT = "date_format"
@@ -464,6 +475,20 @@ def validate_config(config):
 
     return config
 
+SCREEN_LIGHT_SCHEMA = light.BRIGHTNESS_ONLY_LIGHT_SCHEMA.extend(
+    {
+        cv.GenerateID(CONF_OUTPUT_ID): cv.declare_id(
+            nspanel_lovelace_ns.class_("ScreenLight", light.LightOutput)
+        ),
+        cv.Optional(
+            CONF_DEFAULT_TRANSITION_LENGTH, default="0s"
+        ): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_RESTORE_MODE, default="ALWAYS_ON"): cv.enum(
+            light.RESTORE_MODES, upper=True, space="_"
+        ),
+    }
+)
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema({
         cv.GenerateID(): cv.declare_id(NSPanelLovelace),
@@ -474,6 +499,20 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_DEFAULT_CARD): cv.string_strict,
         # Allow the screensaver and cards to be replaced without compiling (see set_layout)
         cv.Optional(CONF_RUNTIME_LAYOUT, default=False): cv.boolean,
+        cv.Optional(CONF_PANEL_SETTINGS, default=True): cv.boolean,
+        # Shown on the panel's diagnostics page
+        cv.Optional(CONF_TEMPERATURE_SENSOR): cv.use_id(sensor.Sensor),
+        # What the layout can reassign: what each physical button does, and how the relays appear
+        cv.Optional(CONF_RELAYS): cv.All(
+            cv.ensure_list(cv.Schema({
+                cv.Required(CONF_LIGHT): cv.use_id(light.LightState),
+                cv.Optional(CONF_SWITCH): cv.use_id(switch.Switch),
+                cv.Optional(CONF_BUTTON): cv.use_id(binary_sensor.BinarySensor),
+            })),
+            cv.Length(min=1, max=2),
+        ),
+        cv.Optional(CONF_SCREEN_LIGHT): SCREEN_LIGHT_SCHEMA,
+        cv.Optional(CONF_SCREENSAVER_LIGHT): SCREEN_LIGHT_SCHEMA,
         cv.Optional(CONF_LOCALE, default={}): SCHEMA_LOCALE,
         cv.Optional(CONF_SCREENSAVER): SCHEMA_SCREENSAVER,
         cv.Optional(CONF_INCOMING_MSG): automation.validate_automation(
@@ -730,6 +769,35 @@ async def to_code(config):
         cg.add_define("USE_API_CUSTOM_SERVICES")
         cg.add_define("USE_NSPANEL_RUNTIME_LAYOUT")
         cg.add(nspanel.set_model(config[CONF_MODEL]))
+
+    if CONF_RELAYS in config:
+        if not config[CONF_RUNTIME_LAYOUT]:
+            raise cv.Invalid(f"{CONF_RELAYS} requires {CONF_RUNTIME_LAYOUT}")
+        cg.add_define("USE_NSPANEL_RELAYS")
+        for relay in config[CONF_RELAYS]:
+            relay_light = await cg.get_variable(relay[CONF_LIGHT])
+            relay_switch = await cg.get_variable(relay[CONF_SWITCH]) if CONF_SWITCH in relay else cg.nullptr
+            button = await cg.get_variable(relay[CONF_BUTTON]) if CONF_BUTTON in relay else cg.nullptr
+            cg.add(nspanel.add_relay(relay_light, relay_switch, button))
+
+    if config[CONF_PANEL_SETTINGS]:
+        cg.add_define("USE_API_CUSTOM_SERVICES")
+        cg.add_define("USE_NSPANEL_PANEL_SETTINGS")
+        cg.add(nspanel.set_settings_max_rows(4 if config[CONF_MODEL] in ("eu", "us-l") else 6))
+        if CONF_TEMPERATURE_SENSOR in config:
+            cg.add_define("USE_NSPANEL_TEMPERATURE_SENSOR")
+            cg.add(nspanel.set_temperature_sensor(await cg.get_variable(config[CONF_TEMPERATURE_SENSOR])))
+
+    for key in (CONF_SCREEN_LIGHT, CONF_SCREENSAVER_LIGHT):
+        if key not in config:
+            continue
+        if not config[CONF_PANEL_SETTINGS]:
+            raise cv.Invalid(f"{key} requires {CONF_PANEL_SETTINGS}")
+        cg.add_define("USE_NSPANEL_SCREEN_LIGHT")
+        screen_light = cg.new_Pvariable(config[key][CONF_OUTPUT_ID])
+        cg.add(screen_light.set_parent(nspanel))
+        cg.add(screen_light.set_screensaver(key == CONF_SCREENSAVER_LIGHT))
+        await light.register_light(screen_light, config[key])
 
     if CONF_SCREENSAVER in config:
         cg.add(nspanel.set_display_timeout(config[CONF_SLEEP_TIMEOUT]))

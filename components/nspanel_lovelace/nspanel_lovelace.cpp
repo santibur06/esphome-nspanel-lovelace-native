@@ -115,6 +115,10 @@ void NSPanelLovelace::setup() {
     ESP_LOGD(TAG, "Bookmarks configured def:%u,scr:%u", bm_set_def, bm_set_scr);
   #endif
 
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  this->setup_panel_settings_();
+#endif
+
 #ifdef USE_TIME
   this->setup_time_();
 #endif
@@ -143,6 +147,7 @@ void NSPanelLovelace::setup() {
 
   for (auto &entity : this->entities_) {
     auto &entity_id = entity->get_entity_id();
+    if (get_entity_type(entity_id) == entity_type::nspanel) continue;
     ESP_LOGV(TAG, "Adding subscriptions for entity '%s'", entity_id.c_str());
     bool add_state_subscription = false;
     if (entity->is_type(entity_type::light)) {
@@ -403,7 +408,18 @@ std::shared_ptr<Entity> NSPanelLovelace::create_entity(const std::string &entity
   for (auto &e : this->entities_) {
     if (entity_id == e->get_entity_id()) return e;
   }
-  auto entity = std::make_shared<Entity>(entity_id);
+  std::shared_ptr<Entity> entity;
+  if (get_entity_type(entity_id) == entity_type::nspanel) {
+    // Local rows only borrow the look of a Home Assistant entity
+    const char *type = entity_type::button;
+    if (entity_id == "nspanel.button_lock") type = entity_type::switch_;
+    else if (entity_id == "nspanel.brightness" || entity_id == "nspanel.screensaver_brightness") type = entity_type::number;
+    else if (entity_id == "nspanel.panel_lock") type = entity_type::alarm_control_panel;
+    else if (entity_id.rfind("nspanel.diag_", 0) == 0) type = entity_type::sensor;
+    entity = std::make_shared<Entity>(entity_id, type);
+  } else {
+    entity = std::make_shared<Entity>(entity_id);
+  }
   this->entities_.push_back(entity);
   return entity;
 }
@@ -437,9 +453,11 @@ void NSPanelLovelace::set_display_timeout(uint16_t timeout) {
 }
 
 void NSPanelLovelace::set_display_active_dim(uint8_t active) {
+  if (this->brightness_managed_) return;
   this->set_display_dim(UINT8_MAX, active);
 }
 void NSPanelLovelace::set_display_inactive_dim(uint8_t inactive) {
+  if (this->brightness_managed_) return;
   this->set_display_dim(inactive);
 }
 void NSPanelLovelace::set_display_dim(uint8_t inactive, uint8_t active) {
@@ -462,14 +480,15 @@ void NSPanelLovelace::set_display_dim(uint8_t inactive, uint8_t active) {
     this->display_inactive_dim_ = inactive;
   }
 
-  if (save_state) this->save_state_();
+  // a brightness rule works it out again after a reboot, and may change it often
+  if (save_state && !this->brightness_managed_) this->save_state_();
   
   this->command_buffer_
     .assign("dimmode").append(1, SEPARATOR)
     // brightness when inactive (after timeout reached)
-    .append(esphome::to_string(this->display_inactive_dim_)).append(1, SEPARATOR)
+    .append(esphome::to_string(this->screen_off_ ? 0 : this->display_inactive_dim_)).append(1, SEPARATOR)
     // brightness when active (when buttons pressed)
-    .append(esphome::to_string(this->display_active_dim_)).append(1, SEPARATOR)
+    .append(esphome::to_string(this->previewing_inactive_dim_ ? this->display_inactive_dim_ : this->display_active_dim_)).append(1, SEPARATOR)
     // background colour when active (not screensaver background, defaults to ha-dark)
     .append(esphome::to_string(6371)).append(2, SEPARATOR)
     .append(esphome::to_string(this->global_vertical_ui_ ? 1 : 0));
@@ -552,7 +571,10 @@ void NSPanelLovelace::process_command(const std::string &message) {
 #endif
 
 void NSPanelLovelace::process_command_(const std::string &message) {
-  ESP_LOGD(TAG, "TFT CMD IN: %s", message.c_str());
+  // keypad entries on the lock screen carry the PIN
+  if (message.find("nspanel.panel_lock") == std::string::npos) {
+    ESP_LOGD(TAG, "TFT CMD IN: %s", message.c_str());
+  }
 
   std::vector<std::string> tokens;
   tokens.reserve(5);
@@ -567,6 +589,7 @@ void NSPanelLovelace::process_command_(const std::string &message) {
       this->process_button_press_(tokens.at(2), tokens.at(3));
     }
   } else if (tokens.at(1) == action_type::pageOpenDetail) {
+    if (this->panel_locked_) return;
     this->render_popup_page_(tokens.at(3));
   } else if (tokens.at(1) == action_type::sleepReached) {
     //std::string page = tokens.at(2);
@@ -684,6 +707,14 @@ void NSPanelLovelace::render_current_page_() {
     // this->render_page_(render_page_option::screensaver_page);
     return;
   }
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  // While locked only the lock screen can be shown, and the screensaver if that was chosen
+  if (this->panel_locked_ && this->lock_card_ != nullptr &&
+      !(this->lock_shows_screensaver_ && page->is_type(page_type::screensaver))) {
+    page = this->page_mgr_.find_page(this->lock_card_->get_uuid(), true);
+  }
+  if (!page->is_type(page_type::screensaver)) this->wake_screen_();
+#endif
 
   this->command_buffer_.assign("pageType")
       .append(1, SEPARATOR)
@@ -1383,6 +1414,7 @@ void NSPanelLovelace::process_display_command_queue_() {
   crc_data[0] = static_cast<uint8_t>(crc & 0xFF);
   crc_data[1] = static_cast<uint8_t>((crc >> 8) & 0xFF);
   this->write_array(crc_data.data(), 2);
+
   
   this->command_buffer_.clear();
   this->command_last_sent_ = millis();
@@ -1702,6 +1734,9 @@ void NSPanelLovelace::check_time_() {
 
   // todo: only check if the current page is screensaver?
   ESPTime now = this->time_id_.value()->now();
+#ifdef USE_NSPANEL_RUNTIME_LAYOUT
+  this->loop_brightness_steps_(now);
+#endif
   // update the date once an hour to account for daylight saving etc.
   if (now.hour != this->now_hour_) {
     this->update_datetime(datetime_mode::both);
@@ -1735,8 +1770,19 @@ void NSPanelLovelace::process_button_press_(
     bool called_from_timeout) {
   if (button_type.empty()) return;
 
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  if (internal_id == "nspanel.panel_lock" && button_type == button_type::disarm) {
+    this->try_unlock_(value);
+    return;
+  }
+  if (this->panel_locked_ && this->process_locked_press_(button_type)) return;
+#endif
+
   // Screen tapped when on the screensaver, show the default card or use the first card in the config.
   if (internal_id == to_string(page_type::screensaver) && button_type == button_type::bExit) {
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+    this->wake_screen_();
+#endif
     // todo: make a note of last used card
     //
     // config.get("screensaver.defaultCard")
@@ -1807,6 +1853,13 @@ void NSPanelLovelace::process_button_press_(
     entity_type = get_entity_type(entity_id);
     if (entity_type == nullptr) return;
   }
+
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  if (entity_type == entity_type::nspanel) {
+    this->process_panel_row_press_(entity_id, button_type, value);
+    return;
+  }
+#endif
 
   if (button_type == button_type::onOff) {
     if (!value.empty()) {
@@ -1885,6 +1938,9 @@ void NSPanelLovelace::process_button_press_(
     if (entity_type == entity_type::navigate ||
         entity_type == entity_type::navigate_uuid) {
       auto uuid = internal_id.substr(strlen(entity_type) + 1);
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+      if (this->process_settings_nav_(uuid)) return;
+#endif
       this->render_page_(uuid);
     } else if (entity_type == entity_type::nav_prev) {
       this->render_page_(render_page_option::prev);

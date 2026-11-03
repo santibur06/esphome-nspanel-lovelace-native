@@ -37,6 +37,9 @@
 #ifdef USE_TIME
 #include "esphome/core/time.h"
 #include "esphome/components/time/real_time_clock.h"
+#ifdef USE_NSPANEL_TEMPERATURE_SENSOR
+#include "esphome/components/sensor/sensor.h"
+#endif
 #endif
 
 #include "config.h"
@@ -48,6 +51,14 @@
 #include "card_base.h"
 #include "pages.h"
 
+#ifdef USE_NSPANEL_SCREEN_LIGHT
+namespace esphome {
+namespace light {
+class LightState;
+}
+}
+#endif
+
 namespace esphome {
 namespace nspanel_lovelace {
 
@@ -55,6 +66,8 @@ PACK(struct NSPanelRestoreState {
   uint8_t display_active_dim_ = 100;
   uint8_t display_inactive_dim_ = 50;
 });
+
+class AlarmCard;
 
 class NSPanelLovelace : public Component, public uart::UARTDevice, public api::CustomAPIDevice {
 public:
@@ -135,6 +148,38 @@ public:
   // Validates and stores a layout (json), then reboots to apply it. An empty value removes the stored layout.
   void set_layout(std::string layout_json);
   void report_layout_status();
+#ifdef USE_NSPANEL_RELAYS
+  // A relay's light, and optionally its switch and physical button, which are reported to Home Assistant
+  // so that it can show the ones wanted. The layout decides what each button does.
+  void add_relay(light::LightState *light, EntityBase *relay_switch, EntityBase *button);
+  // Does what the layout says for this physical button. Without a rule it toggles the button's own relay.
+  void press_button(uint8_t index);
+#endif
+#endif
+
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  void lock_panel();
+  void unlock_panel();
+  // Digits only, 4 to 8 of them. An empty value removes the PIN and unlocks the panel.
+  void set_lock_pin(std::string pin);
+  // The hash of a PIN (8 hex characters), all zeros removes it
+  void set_lock_pin_hash(std::string hash);
+  void set_button_lock(bool locked);
+#ifdef USE_NSPANEL_TEMPERATURE_SENSOR
+  void set_temperature_sensor(sensor::Sensor *temperature_sensor) { this->temperature_sensor_ = temperature_sensor; }
+#endif
+  void set_settings_max_rows(uint8_t rows) { this->settings_max_rows_ = rows; }
+#ifdef USE_NSPANEL_SCREEN_LIGHT
+  void set_screen_light_state(light::LightState *state) { this->screen_light_ = state; }
+  void set_screen_from_light(bool on, float brightness);
+  void set_screensaver_light_state(light::LightState *state) { this->screensaver_light_ = state; }
+  void set_screensaver_from_light(bool on, float brightness);
+#endif
+  // 'open', 'pin' (ignored while no PIN is set) or 'hidden'
+  void set_settings_access(std::string access);
+  // While locked: 'keypad' always shows the keypad, 'screensaver' shows it only when tapped
+  void set_lock_display(std::string display);
+  bool buttons_locked() const { return this->buttons_locked_; }
 #endif
 
   bool get_double_tap_to_unlock() const { return this->double_tap_to_unlock_; }
@@ -291,7 +336,97 @@ protected:
 #endif
   void send_weather_update_command_();
   std::string weather_entity_id_;
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  void setup_panel_settings_();
+  void apply_lock_pin_hash_(uint32_t hash);
+  void save_panel_settings_();
+  void update_panel_entities_();
+  void report_panel_settings_();
+  void link_settings_page_();
+  void setup_diagnostics_(uint16_t sleep_timeout);
+  std::string diagnostics_value_(const std::string &entity_id) const;
+  void update_lock_row_();
+  void update_lock_card_();
+  void wake_screen_(bool sync_light = true);
+  void turn_screen_off_();
+  void on_brightness_changed_();
+  void sync_screen_light_();
+  bool process_settings_nav_(const std::string &uuid);
+  bool process_locked_press_(const std::string &button_type);
+  void process_panel_row_press_(const std::string &entity_id,
+    const std::string &button_type, const std::string &value);
+  void try_unlock_(const std::string &pin);
+  void show_lock_message_(const char *translation_key);
+  const char *lock_title_() const;
+
+  AlarmCard *lock_card_{nullptr};
+  EntitiesCard *diagnostics_card_{nullptr};
+#ifdef USE_NSPANEL_TEMPERATURE_SENSOR
+  sensor::Sensor *temperature_sensor_{nullptr};
+#endif
+  Card *settings_card_{nullptr};
+  std::shared_ptr<PageItem> lock_row_;
+  uint8_t settings_max_rows_{6};
+  bool has_screensaver_{false};
+  bool screen_off_{false};
+#ifdef USE_NSPANEL_SCREEN_LIGHT
+  light::LightState *screen_light_{nullptr};
+  light::LightState *screensaver_light_{nullptr};
+  bool screen_light_ready_{false};
+#endif
+  bool panel_locked_{false};
+  bool buttons_locked_{false};
+  // Sends the screensaver brightness as the active one, so it shows on any page for a moment
+  bool previewing_inactive_dim_{false};
+  uint8_t settings_access_{0};
+  bool lock_shows_screensaver_{false};
+  uint16_t lock_sleep_timeout_{10};
+  uint32_t lock_pin_hash_{0};
+  uint8_t lock_failed_attempts_{0};
+  uint32_t lock_failed_at_{0};
+#else
+  static constexpr bool panel_locked_ = false;
+  static constexpr bool screen_off_ = false;
+  static constexpr bool previewing_inactive_dim_ = false;
+#endif
+  // Set by a brightness rule in the layout, which then decides the dimming
+  bool brightness_managed_{false};
 #ifdef USE_NSPANEL_RUNTIME_LAYOUT
+  struct BrightnessStep {
+    uint16_t minute;
+    uint8_t active;
+    uint8_t inactive;
+  };
+  std::vector<BrightnessStep> brightness_steps_;
+  int8_t brightness_step_applied_{-1};
+  float brightness_entity_from_{0.0f};
+  float brightness_entity_to_{100.0f};
+  int16_t brightness_entity_inactive_low_{-1};
+  int16_t brightness_entity_inactive_high_{-1};
+  void build_brightness_(JsonObjectConst config);
+#ifdef USE_NSPANEL_RELAYS
+  struct Relay {
+    light::LightState *light;
+    EntityBase *relay_switch;
+    EntityBase *button;
+    // What the physical button does: a relay's index, or one of the values below
+    int8_t button_target;
+    std::string button_entity_id;
+  };
+  static constexpr int8_t BUTTON_TARGET_ENTITY = -1;
+  static constexpr int8_t BUTTON_TARGET_NONE = -2;
+  std::vector<Relay> relays_;
+  bool validate_buttons_(JsonObjectConst layout, std::string &error) const;
+  void build_buttons_(JsonObjectConst layout);
+#endif
+#ifdef USE_TIME
+  void loop_brightness_steps_(const ESPTime &now);
+#endif
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026,1,0)
+  void on_brightness_entity_(const std::string &entity_id, esphome::StringRef state);
+#else
+  void on_brightness_entity_(std::string entity_id, std::string state);
+#endif
   void load_stored_layout_();
   bool validate_layout_(JsonObjectConst layout, std::string &error);
   void build_layout_(JsonObjectConst layout);

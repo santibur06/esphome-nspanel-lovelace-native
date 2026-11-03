@@ -94,6 +94,7 @@ public:
 
   void set_show_keypad(bool show_keypad) { this->show_keypad_ = show_keypad; }
   bool add_arm_button(alarm_arm_action action);
+  void set_disarm_text(const std::string &text) { this->disarm_button_->set_display_name(text); }
 
   void on_entity_state_change(const std::string &state) override;
   void on_entity_attribute_change(ha_attr_type attr, const std::string &value) override;

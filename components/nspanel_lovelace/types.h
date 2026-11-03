@@ -344,6 +344,8 @@ struct entity_type {
   static constexpr const char* navigate_uuid = "navigate.uuid";
   static constexpr const char* itext = "iText";
   static constexpr const char* delete_ = "delete";
+  // handled by the panel itself, never subscribed in Home Assistant
+  static constexpr const char* nspanel = "nspanel";
 };
 
 struct entity_render_type {
@@ -1024,7 +1026,8 @@ inline const char *get_entity_type(const std::string &entity_id) {
   
 	auto type = entity_id.substr(0, pos);
 
-	if (type == entity_type::light) return entity_type::light;
+	if (type == entity_type::nspanel) return entity_type::nspanel;
+	else if (type == entity_type::light) return entity_type::light;
   else if (type == entity_type::switch_) return entity_type::switch_;
   else if (type == entity_type::input_boolean) return entity_type::input_boolean;
   else if (type == entity_type::automation) return entity_type::automation;

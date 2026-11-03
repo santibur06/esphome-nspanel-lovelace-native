@@ -49,6 +49,7 @@ public:
   virtual std::string &render(std::string &buffer) = 0;
 
   void add_item(const std::shared_ptr<PageItem> &item);
+  void remove_item(const std::string &uuid);
   void add_item_range(const std::vector<std::shared_ptr<PageItem>> &items);
   const std::vector<std::shared_ptr<PageItem>> &get_items() {
     return this->items_;

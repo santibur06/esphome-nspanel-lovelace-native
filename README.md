@@ -34,6 +34,64 @@ The NSPanel has on-board PSRAM which this project makes use of automatically, wh
 - Icon colours need to be a 16-bit number (0-65535) representing a `rgb565` colour code. This website can be used to select your colour https://chrishewett.com/blog/true-rgb565-colour-picker/ - then you take the rgb565 hex value and convert it to a number (e.g. `#ce79` -> `52857`).
 
 
+## Brightness rules
+
+A runtime layout can set the brightness by time or from a Home Assistant entity. The rule runs on the panel, and the slider and screen light still work until the rule's next change. `set_display_inactive_dim` and `set_display_active_dim` are ignored while a rule is set.
+
+```json
+{"brightness": {"mode": "schedule", "schedule": [
+  {"time": "09:00", "active": 100, "inactive": 30},
+  {"time": "21:00", "active": 60, "inactive": 1}
+]}}
+```
+
+```json
+{"brightness": {"mode": "entity", "entity_id": "sensor.illuminance", "from": 0, "to": 200, "inactive_low": 1, "inactive_high": 30}}
+```
+
+`from` and `to` are the entity values that give the lowest and highest brightness. `inactive_low` and `inactive_high` are the screensaver brightness at those two values. They are optional, and setting both to the same value keeps it fixed.
+
+## Buttons and relays
+
+List the relays in the device configuration, and a runtime layout can then decide what each physical button does.
+
+```yaml
+nspanel_lovelace:
+  relays:
+    - light: light1
+      switch: switch1
+      button: button1
+    - light: light2
+      switch: switch2
+      button: button2
+
+binary_sensor:
+  - platform: gpio
+    id: button1
+    on_press:
+      - lambda: id(nspanel).press_button(0);
+```
+
+```json
+{"buttons": {"left": {"action": "entity", "entity_id": "light.ceiling"}, "right": {"action": "none"}}}
+```
+
+`action` is `left` or `right` to toggle that relay, `entity` to command `entity_id`, or `none`. Without one, a button toggles its own relay. `entity` needs Home Assistant, so the button does nothing while it is offline.
+
+The panel reports the names of these entities in its status event. Keep them out of `internal` and set `disabled_by_default: true` on the ones you don't normally want, and the layout editor enables or disables them in Home Assistant. This works the same on every ESPHome version, and a light and a switch keep their own entity IDs when you change between them.
+
+## Screen light
+
+Add lights that control the screen. The brightness of `screen_light` is the normal brightness, and turning it off turns the screen off until it's tapped or turned back on. The brightness of `screensaver_light` is the brightness on the screensaver, and turning it off makes that 0. The screensaver brightness is kept below the normal one.
+
+```yaml
+nspanel_lovelace:
+  screen_light:
+    name: Screen
+  screensaver_light:
+    name: Screensaver
+```
+
 ## Runtime layouts
 
 Add `runtime_layout: true` to change the screensaver and cards without compiling or flashing:
@@ -181,3 +239,28 @@ template:
 # License
 
 Code in this repository is licensed under the GPLv3 license. Third-party code used in this project have their own license terms. Please see [the license document](LICENSE) for more information.
+
+## Panel settings
+
+Every panel gets a settings page unless you set `panel_settings: false`. It works without Home Assistant and has these rows:
+
+- **Lock buttons** stops the physical buttons, no PIN involved. The relays still respond to the screen and Home Assistant.
+- **Brightness** sets the screen's normal brightness.
+- **Screensaver brightness** sets the brightness on the screensaver, from 0 to 100.
+- **Turn screen off** turns the screen off until it's tapped. It needs a screensaver, and models with 4 rows leave it out.
+- **Lock screen** asks for confirmation, then shows a keypad until the PIN is entered. This row only appears once a PIN has been set from Home Assistant.
+
+The button at the top right reboots the panel, after asking for confirmation. With one page on the panel, settings opens from a gear in the right arrow slot. With more pages, the arrows at the ends of the rotation lead to it.
+
+The services are `lock_panel`, `unlock_panel`, `set_lock_pin` (4 to 8 digits, empty removes the PIN and unlocks), `set_lock_pin_hash` (what the layout editor uses to give every panel one PIN), `set_button_lock`, `set_settings_access` (`open`, `pin` or `hidden`) and `set_lock_display` (`keypad` or `screensaver`). `pin` asks for the PIN each time settings is opened. While locked, `keypad` always shows the keypad and the screen stays at its normal brightness. `screensaver` shows the screensaver, a tap brings up the keypad and it goes back after the timeout. Everything survives a reboot. The panel stores a hash of the PIN and waits 30 seconds after 5 wrong attempts. This keeps people from using the screen, it doesn't protect against someone with access to the device or to Home Assistant.
+
+The physical buttons are in your own configuration, so check the state there:
+
+```yaml
+on_press:
+  - if:
+      condition:
+        lambda: return !id(nspanel).buttons_locked();
+      then:
+        - light.toggle: light1
+```

@@ -73,6 +73,15 @@ void Page::add_item(const std::shared_ptr<PageItem> &item) {
   this->on_item_added_(item);
 }
 
+void Page::remove_item(const std::string &uuid) {
+  for (auto it = this->items_.begin(); it != this->items_.end(); ++it) {
+    if ((*it)->get_uuid() == uuid) {
+      this->items_.erase(it);
+      return;
+    }
+  }
+}
+
 void Page::add_item_range(const std::vector<std::shared_ptr<PageItem>> &items) {
   for (auto& item : items) {
     this->add_item(item);

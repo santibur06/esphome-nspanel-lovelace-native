@@ -8,9 +8,14 @@
 #include "pages.h"
 #include "types.h"
 #include "esphome/components/json/json_util.h"
+#ifdef USE_NSPANEL_RELAYS
+#include "esphome/components/light/light_state.h"
+#endif
 #include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#include <algorithm>
+#include <cstdio>
 #include <map>
 #include <nvs.h>
 #include <set>
@@ -26,6 +31,8 @@ static const size_t LAYOUT_MAX_SIZE = 16384;
 static const size_t LAYOUT_MAX_CARDS = 32;
 static const uint32_t LAYOUT_REBOOT_DELAY_MS = 500;
 static const uint32_t LAYOUT_STATUS_DELAY_MS = 3000;
+static const size_t BRIGHTNESS_MAX_STEPS = 8;
+static const int BRIGHTNESS_MIN = 5;
 
 /*
  * =============== helpers ===============
@@ -83,6 +90,8 @@ static bool is_valid_icon(const char *hex) {
 
 static bool is_valid_entity_id(const char *id) {
   if (strcmp(id, "delete") == 0) return true;
+  // these rows belong to the built in settings page
+  if (strncmp(id, "nspanel.", 8) == 0) return false;
   // free text is allowed after 'iText.', see valid_entity_id() in __init__.py
   if (strncmp(id, "iText.", 6) == 0) return strchr(id, SEPARATOR) == nullptr;
   const char *dot = strchr(id, '.');
@@ -149,7 +158,158 @@ static bool validate_screensaver_entity(JsonObjectConst entity, std::string &err
  * =============== validation ===============
  */
 
+static bool parse_step_time(const char *text, uint16_t &minute) {
+  unsigned hour = 0, min = 0;
+  if (sscanf(text, "%2u:%2u", &hour, &min) != 2 || hour > 23 || min > 59) return false;
+  minute = hour * 60 + min;
+  return true;
+}
+
+static bool validate_brightness(JsonObjectConst config, std::string &error) {
+  auto in_range = [](JsonVariantConst value, int min, int max) {
+    return value.is<int>() && value.as<int>() >= min && value.as<int>() <= max;
+  };
+  std::string mode = config["mode"] | "";
+  if (mode == "schedule") {
+    JsonArrayConst steps = config["schedule"];
+    if (steps.size() == 0 || steps.size() > BRIGHTNESS_MAX_STEPS) {
+      error = "brightness: the schedule needs 1 to " + std::to_string(BRIGHTNESS_MAX_STEPS) + " times";
+      return false;
+    }
+    for (JsonObjectConst step : steps) {
+      uint16_t minute;
+      if (!parse_step_time(step["time"] | "", minute)) {
+        error = "brightness: invalid time";
+        return false;
+      }
+      if (!in_range(step["active"], BRIGHTNESS_MIN, 100) || !in_range(step["inactive"], 0, 100)) {
+        error = "brightness: values must be 5 to 100, and 0 to 100 on standby";
+        return false;
+      }
+    }
+    return true;
+  }
+  if (mode == "entity") {
+    if (!is_valid_entity_id(config["entity_id"] | "")) {
+      error = "brightness: invalid entity_id";
+      return false;
+    }
+    if (!config["from"].is<float>() || !config["to"].is<float>() ||
+        config["from"].as<float>() == config["to"].as<float>()) {
+      error = "brightness: the entity needs two different values for 'from' and 'to'";
+      return false;
+    }
+    bool has_low = !config["inactive_low"].isNull();
+    bool has_high = !config["inactive_high"].isNull();
+    if (has_low != has_high) {
+      error = "brightness: set both standby values or neither";
+      return false;
+    }
+    if (has_low && (!in_range(config["inactive_low"], 0, 100) || !in_range(config["inactive_high"], 0, 100))) {
+      error = "brightness: the standby values must be 0 to 100";
+      return false;
+    }
+    return true;
+  }
+  error = "brightness: unknown mode";
+  return false;
+}
+
+#ifdef USE_NSPANEL_RELAYS
+// The first relay is on the left
+static int side_index(const char *side) {
+  if (strcmp(side, "left") == 0) return 0;
+  if (strcmp(side, "right") == 0) return 1;
+  return -1;
+}
+
+bool NSPanelLovelace::validate_buttons_(JsonObjectConst layout, std::string &error) const {
+  auto valid_side = [this](const char *side) {
+    int index = side_index(side);
+    return index >= 0 && index < static_cast<int>(this->relays_.size());
+  };
+  for (JsonPairConst pair : layout["buttons"].as<JsonObjectConst>()) {
+    if (!valid_side(pair.key().c_str())) {
+      error = std::string("buttons: this panel has no '") + pair.key().c_str() + "' button";
+      return false;
+    }
+    JsonObjectConst button = pair.value();
+    std::string action = button["action"] | "";
+    if (action == "entity") {
+      if (!is_valid_entity_id(button["entity_id"] | "")) {
+        error = "buttons: invalid entity_id";
+        return false;
+      }
+    } else if (!action.empty() && action != "none" && !valid_side(action.c_str())) {
+      error = "buttons: unknown action '" + action + "'";
+      return false;
+    }
+  }
+  return true;
+}
+
+void NSPanelLovelace::build_buttons_(JsonObjectConst layout) {
+  for (JsonPairConst pair : layout["buttons"].as<JsonObjectConst>()) {
+    auto &relay = this->relays_[side_index(pair.key().c_str())];
+    JsonObjectConst button = pair.value();
+    std::string action = button["action"] | "";
+    if (action == "entity") {
+      relay.button_target = BUTTON_TARGET_ENTITY;
+      relay.button_entity_id = button["entity_id"] | "";
+      this->create_entity(relay.button_entity_id);
+    } else if (action == "none") {
+      relay.button_target = BUTTON_TARGET_NONE;
+    } else if (!action.empty()) {
+      relay.button_target = side_index(action.c_str());
+    }
+  }
+}
+
+void NSPanelLovelace::add_relay(light::LightState *light, EntityBase *relay_switch, EntityBase *button) {
+  this->relays_.push_back({light, relay_switch, button, static_cast<int8_t>(this->relays_.size()), ""});
+}
+
+void NSPanelLovelace::press_button(uint8_t index) {
+  if (index >= this->relays_.size()) return;
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  if (this->buttons_locked_) return;
+#endif
+  auto &relay = this->relays_[index];
+  if (relay.button_target >= 0) {
+    this->relays_[relay.button_target].light->toggle().perform();
+  } else if (relay.button_target == BUTTON_TARGET_ENTITY) {
+    const std::string &entity_id = relay.button_entity_id;
+    std::string domain = entity_id.substr(0, entity_id.find('.'));
+    if (domain == "button" || domain == "input_button") {
+      this->call_ha_service_(domain.c_str(), "press", entity_id);
+    } else if (domain == "scene") {
+      this->call_ha_service_(domain.c_str(), ha_action_type::turn_on, entity_id);
+    } else {
+      this->call_ha_service_("homeassistant", ha_action_type::toggle, entity_id);
+    }
+  }
+}
+#endif
+
 bool NSPanelLovelace::validate_layout_(JsonObjectConst layout, std::string &error) {
+#ifdef USE_NSPANEL_RELAYS
+  if (!this->validate_buttons_(layout, error)) return false;
+#else
+  if (!layout["buttons"].isNull()) {
+    error = "buttons: this firmware has no relays configured";
+    return false;
+  }
+#endif
+  JsonObjectConst brightness = layout["brightness"];
+  if (!brightness.isNull() && !validate_brightness(brightness, error)) return false;
+#ifdef USE_TIME
+  if (!brightness.isNull() && (brightness["mode"] | "") == std::string("schedule") &&
+      !this->time_id_.has_value()) {
+    error = "brightness: the schedule needs a time_id in the device configuration";
+    return false;
+  }
+#endif
+
   JsonObjectConst screensaver = layout["screensaver"];
 #ifdef USE_TIME
   if (!screensaver.isNull() && !this->time_id_.has_value()) {
@@ -357,6 +517,12 @@ void NSPanelLovelace::build_layout_(JsonObjectConst layout) {
   this->entities_.clear();
   this->weather_entity_id_.clear();
 
+  JsonObjectConst brightness = layout["brightness"];
+  if (!brightness.isNull()) this->build_brightness_(brightness);
+#ifdef USE_NSPANEL_RELAYS
+  this->build_buttons_(layout);
+#endif
+
   size_t uuid_index = 0;
   auto new_uuid = [&uuid_index]() { return std::string("r") + std::to_string(++uuid_index); };
 
@@ -526,6 +692,71 @@ void NSPanelLovelace::build_layout_(JsonObjectConst layout) {
  * =============== storage and service ===============
  */
 
+void NSPanelLovelace::build_brightness_(JsonObjectConst config) {
+  this->brightness_managed_ = true;
+  if (strcmp(config["mode"] | "", "entity") == 0) {
+    this->brightness_entity_from_ = config["from"].as<float>();
+    this->brightness_entity_to_ = config["to"].as<float>();
+    this->brightness_entity_inactive_low_ = config["inactive_low"] | -1;
+    this->brightness_entity_inactive_high_ = config["inactive_high"] | -1;
+    this->subscribe_homeassistant_state(
+        &NSPanelLovelace::on_brightness_entity_, std::string(config["entity_id"] | ""));
+    return;
+  }
+  for (JsonObjectConst step : config["schedule"].as<JsonArrayConst>()) {
+    uint16_t minute = 0;
+    parse_step_time(step["time"] | "", minute);
+    this->brightness_steps_.push_back({minute, static_cast<uint8_t>(step["active"].as<int>()), static_cast<uint8_t>(step["inactive"].as<int>())});
+  }
+  std::sort(this->brightness_steps_.begin(), this->brightness_steps_.end(),
+      [](const BrightnessStep &a, const BrightnessStep &b) { return a.minute < b.minute; });
+}
+
+#ifdef USE_TIME
+void NSPanelLovelace::loop_brightness_steps_(const ESPTime &now) {
+  if (this->brightness_steps_.empty()) return;
+  uint16_t minute = now.hour * 60 + now.minute;
+  // Before the first time of the day, the last one from yesterday still applies
+  int8_t index = this->brightness_steps_.size() - 1;
+  for (size_t i = 0; i < this->brightness_steps_.size(); i++) {
+    if (this->brightness_steps_[i].minute <= minute) index = i;
+  }
+  // Only on a change, so that the slider and the light keep working until the next time
+  if (index == this->brightness_step_applied_) return;
+  this->brightness_step_applied_ = index;
+  auto &step = this->brightness_steps_[index];
+  this->set_display_dim(step.inactive, step.active);
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  this->on_brightness_changed_();
+#endif
+}
+#endif
+
+void NSPanelLovelace::on_brightness_entity_(
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026,1,0)
+    const std::string &entity_id, esphome::StringRef state
+#else
+    std::string entity_id, std::string state
+#endif
+) {
+  auto value = parse_number<float>(std::string(state.c_str(), state.size()));
+  if (!value.has_value()) return;
+  float position = (*value - this->brightness_entity_from_) /
+      (this->brightness_entity_to_ - this->brightness_entity_from_);
+  position = std::max(0.0f, std::min(1.0f, position));
+  uint8_t active = BRIGHTNESS_MIN + static_cast<uint8_t>(position * (100 - BRIGHTNESS_MIN) + 0.5f);
+  uint8_t inactive = this->display_inactive_dim_;
+  if (this->brightness_entity_inactive_low_ >= 0) {
+    int range = this->brightness_entity_inactive_high_ - this->brightness_entity_inactive_low_;
+    inactive = this->brightness_entity_inactive_low_ + static_cast<int>(position * range + 0.5f);
+  }
+  if (active == this->display_active_dim_ && inactive == this->display_inactive_dim_) return;
+  this->set_display_dim(inactive, active);
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  this->on_brightness_changed_();
+#endif
+}
+
 void NSPanelLovelace::load_stored_layout_() {
   std::string stored;
   if (!load_layout_blob(stored)) return;
@@ -598,13 +829,31 @@ void NSPanelLovelace::set_layout(std::string layout_json) {
 void NSPanelLovelace::report_layout_status() {
   char hash[9];
   snprintf(hash, sizeof(hash), "%08" PRIx32, this->layout_hash_);
-  this->fire_homeassistant_event("esphome.nspanel_lovelace_layout_status", {
+  std::map<std::string, std::string> data = {
     {"device", App.get_name()},
     {"model", this->model_},
     {"source", this->layout_source_},
     {"hash", hash},
     {"error", this->layout_error_},
-  });
+  };
+#ifdef USE_NSPANEL_PANEL_SETTINGS
+  data["locked"] = this->panel_locked_ ? "1" : "0";
+  data["buttons_locked"] = this->buttons_locked_ ? "1" : "0";
+  data["pin_set"] = this->lock_pin_hash_ != 0 ? "1" : "0";
+  data["lock_display"] = this->lock_shows_screensaver_ ? "screensaver" : "keypad";
+  data["settings_access"] = this->settings_access_ == 2 ? "hidden" : this->settings_access_ == 1 ? "pin" : "open";
+#endif
+#ifdef USE_NSPANEL_RELAYS
+  JsonDocument relays;
+  for (auto &relay : this->relays_) {
+    JsonObject item = relays.add<JsonObject>();
+    item["light"] = relay.light->get_name().c_str();
+    if (relay.relay_switch != nullptr) item["switch"] = relay.relay_switch->get_name().c_str();
+    if (relay.button != nullptr) item["button"] = relay.button->get_name().c_str();
+  }
+  serializeJson(relays, data["relays"]);
+#endif
+  this->fire_homeassistant_event("esphome.nspanel_lovelace_layout_status", data);
 }
 
 void NSPanelLovelace::loop_layout_status_() {
