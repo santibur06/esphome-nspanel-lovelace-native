@@ -1,5 +1,7 @@
 # ESPHome Native Component for NSPanel: layout editor fork
 
+> **TFT uploads are fixed here.** If `upload_tft` stalls after the first block or leaves your screen on "System data ERROR!", this fork finishes the upload. It has the fixes from upstream [#77](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/77) and [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82), which aren't merged upstream yet. See [Installation](#installation).
+
 This is a fork of [olicooper/esphome-nspanel-lovelace-native](https://github.com/olicooper/esphome-nspanel-lovelace-native). It adds what the [NSPanel Lovelace layout editor](https://github.com/santibur06/nspanel-lovelace-editor) needs to change a panel from Home Assistant, without compiling or flashing:
 
 - [Runtime layouts](#runtime-layouts): the screensaver and cards are sent to the panel and stored there.
