@@ -7,9 +7,9 @@ This is a fork of [olicooper/esphome-nspanel-lovelace-native](https://github.com
 - [Brightness rules](#brightness-rules) by time or from an entity.
 - [Buttons and relays](#buttons-and-relays): the layout decides what each physical button does.
 - [Screen light](#screen-light): the screen's brightness as Home Assistant lights.
-- More reliable TFT uploads, also offered upstream in [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82).
+- [TFT uploads that finish](#installation): the fixes from upstream [#77](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/77) and [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82), which aren't merged upstream yet.
 
-Everything works with the same HMI TFT as upstream, described in [Installation](#installation). The features are on the `generic/runtime-layouts` branch, so point `external_components` at it:
+Everything works with the same HMI TFT as upstream, described in [Installation](#installation). The features are on the `generic/runtime-layouts` branch, so point `external_components` at it, as the [basic](basic-example.yaml) and [advanced](advanced-example.yaml) examples do:
 
 ```yaml
 external_components:
@@ -39,7 +39,9 @@ The installation of ESPHome on the ESP32 follows the standard ESPHome build meth
 
 For the GUI, this project relies on the HMI TFT firmware from the [ESPHome NSPanel Lovelace UI](https://github.com/sairon/esphome-nspanel-lovelace-ui) project. 
 The firmware version reported by the screen needs to be `52` or `53` for it to be compatible with this project.
-If you don't have the custom HMI TFT firmware installed already you will need to upload the appropriate `nspanel*.tft` file from `v4.3.3` of the project which can be [found here](https://github.com/joBr99/nspanel-lovelace-ui/tree/v4.3.3/HMI). You can upload the correct TFT firmware after installing this component on the ESP32 by using the `upload_tft` service (seen in the [basic example](basic-example.yaml#L60)) exposed by the device in HomeAssistant.
+If you don't have the custom HMI TFT firmware installed already you will need to upload the appropriate `nspanel*.tft` file from `v4.3.3` of the project which can be [found here](https://github.com/joBr99/nspanel-lovelace-ui/tree/v4.3.3/HMI). You can upload the correct TFT firmware after installing this component on the ESP32 by using the `upload_tft` service (seen in the [basic example](basic-example.yaml#L64)) exposed by the device in HomeAssistant. Pass it the file's raw URL, for example `https://raw.githubusercontent.com/joBr99/nspanel-lovelace-ui/v4.3.3/HMI/nspanel.tft`.
+
+This fork's TFT upload has the fixes from upstream [#77](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/77) and [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82), which aren't merged upstream yet. Uploads that stall after the first block, or leave the screen on "System data ERROR!", finish here. After the last block the device waits for the display to restart before rebooting itself, which can take up to 30 seconds.
 
 # Configuration
 
@@ -55,9 +57,57 @@ The NSPanel has on-board PSRAM which this project makes use of automatically, wh
 - Icon colours need to be a 16-bit number (0-65535) representing a `rgb565` colour code. This website can be used to select your colour https://chrishewett.com/blog/true-rgb565-colour-picker/ - then you take the rgb565 hex value and convert it to a number (e.g. `#ce79` -> `52857`).
 
 
+## Runtime layouts
+
+Add `runtime_layout: true` to change the screensaver and cards without compiling or flashing:
+
+```yaml
+api:
+  custom_services: true
+
+nspanel_lovelace:
+  runtime_layout: true
+```
+
+The device then has a `set_layout` action that takes a JSON layout. It validates the layout, stores it in flash and reboots to apply it, replacing the `screensaver` and `cards` from your configuration. An empty value removes the stored layout, and the device goes back to its configuration. If a stored layout can't be used, the device also falls back to its configuration.
+
+The device reports what it's using with the `esphome.nspanel_lovelace_layout_status` event, so "Allow the device to perform Home Assistant actions" must be on in its ESPHome integration settings. Call `report_layout_status` to ask for it again. The event also carries the lock state and the relay entities described below.
+
+The [NSPanel Lovelace Layout Editor](https://github.com/santibur06/nspanel-lovelace-editor) lets you edit layouts from a sidebar page in Home Assistant. This option requires ESPHome 2025.7.0 or newer.
+
+## Panel settings
+
+Every panel gets a settings page unless you set `panel_settings: false`. It works without Home Assistant and has these rows:
+
+- **Lock buttons** stops the physical buttons, no PIN involved. The relays still respond to the screen and Home Assistant.
+- **Brightness** sets the screen's normal brightness.
+- **Screensaver brightness** sets the brightness on the screensaver, from 0 to 100.
+- **Turn screen off** turns the screen off until it's tapped. It needs a screensaver, and models with 4 rows leave it out.
+- **Lock screen** asks for confirmation, then shows a keypad until the PIN is entered. This row only appears once a PIN has been set from Home Assistant.
+
+With one page on the panel, settings opens from a gear in the right arrow slot. With more pages, the arrows at the ends of the rotation lead to it. On the settings page, the left button goes home and the right one opens a diagnostics page with the Wi-Fi signal, IP address, Home Assistant connection, uptime and a reboot row that asks for confirmation. Models with 4 rows leave out the last of these to keep the reboot row. To also show the panel's temperature, give it a sensor:
+
+```yaml
+nspanel_lovelace:
+  temperature_sensor: panel_temperature
+```
+
+The services are `lock_panel`, `unlock_panel`, `set_lock_pin` (4 to 8 digits, empty removes the PIN and unlocks), `set_lock_pin_hash` (what the layout editor uses to give every panel one PIN), `set_button_lock`, `set_settings_access` (`open`, `pin` or `hidden`) and `set_lock_display` (`keypad` or `screensaver`). `pin` asks for the PIN each time settings is opened. While locked, `keypad` always shows the keypad and the screen stays at its normal brightness. `screensaver` shows the screensaver, a tap brings up the keypad and it goes back after the timeout. Everything survives a reboot. The panel stores a hash of the PIN and waits 30 seconds after 5 wrong attempts. This keeps people from using the screen, it doesn't protect against someone with access to the device or to Home Assistant.
+
+`press_button` (see [Buttons and relays](#buttons-and-relays)) already respects **Lock buttons**. If your buttons do something else, check the state yourself:
+
+```yaml
+on_press:
+  - if:
+      condition:
+        lambda: return !id(nspanel).buttons_locked();
+      then:
+        - light.toggle: light1
+```
+
 ## Brightness rules
 
-A runtime layout can set the brightness by time or from a Home Assistant entity. The rule runs on the panel, and the slider and screen light still work until the rule's next change. `set_display_inactive_dim` and `set_display_active_dim` are ignored while a rule is set.
+A runtime layout can set the brightness by time or from a Home Assistant entity, with a `brightness` key in the layout. The rule runs on the panel, and the slider and screen light still work until the rule's next change. `set_display_inactive_dim` and `set_display_active_dim` are ignored while a rule is set.
 
 ```json
 {"brightness": {"mode": "schedule", "schedule": [
@@ -65,6 +115,8 @@ A runtime layout can set the brightness by time or from a Home Assistant entity.
   {"time": "21:00", "active": 60, "inactive": 1}
 ]}}
 ```
+
+A schedule has up to 8 times and needs a `time_id` in the device configuration. `active` is 5 to 100 and `inactive`, the screensaver brightness, is 0 to 100.
 
 ```json
 {"brightness": {"mode": "entity", "entity_id": "sensor.illuminance", "from": 0, "to": 200, "inactive_low": 1, "inactive_high": 30}}
@@ -74,7 +126,7 @@ A runtime layout can set the brightness by time or from a Home Assistant entity.
 
 ## Buttons and relays
 
-List the relays in the device configuration, and a runtime layout can then decide what each physical button does.
+List the relays in the device configuration, and a runtime layout can then decide what each physical button does. This needs `runtime_layout: true`.
 
 ```yaml
 nspanel_lovelace:
@@ -103,7 +155,7 @@ The panel reports the names of these entities in its status event. Keep them out
 
 ## Screen light
 
-Add lights that control the screen. The brightness of `screen_light` is the normal brightness, and turning it off turns the screen off until it's tapped or turned back on. The brightness of `screensaver_light` is the brightness on the screensaver, and turning it off makes that 0. The screensaver brightness is kept below the normal one.
+Add lights that control the screen. The brightness of `screen_light` is the normal brightness, and turning it off turns the screen off until it's tapped or turned back on. The brightness of `screensaver_light` is the brightness on the screensaver, and turning it off makes that 0. The screensaver brightness is kept below the normal one. These need the panel settings, which are on unless you turn them off.
 
 ```yaml
 nspanel_lovelace:
@@ -112,49 +164,6 @@ nspanel_lovelace:
   screensaver_light:
     name: Screensaver
 ```
-
-## Panel settings
-
-Every panel gets a settings page unless you set `panel_settings: false`. It works without Home Assistant and has these rows:
-
-- **Lock buttons** stops the physical buttons, no PIN involved. The relays still respond to the screen and Home Assistant.
-- **Brightness** sets the screen's normal brightness.
-- **Screensaver brightness** sets the brightness on the screensaver, from 0 to 100.
-- **Turn screen off** turns the screen off until it's tapped. It needs a screensaver, and models with 4 rows leave it out.
-- **Lock screen** asks for confirmation, then shows a keypad until the PIN is entered. This row only appears once a PIN has been set from Home Assistant.
-
-The button at the top right reboots the panel, after asking for confirmation. With one page on the panel, settings opens from a gear in the right arrow slot. With more pages, the arrows at the ends of the rotation lead to it.
-
-The services are `lock_panel`, `unlock_panel`, `set_lock_pin` (4 to 8 digits, empty removes the PIN and unlocks), `set_lock_pin_hash` (what the layout editor uses to give every panel one PIN), `set_button_lock`, `set_settings_access` (`open`, `pin` or `hidden`) and `set_lock_display` (`keypad` or `screensaver`). `pin` asks for the PIN each time settings is opened. While locked, `keypad` always shows the keypad and the screen stays at its normal brightness. `screensaver` shows the screensaver, a tap brings up the keypad and it goes back after the timeout. Everything survives a reboot. The panel stores a hash of the PIN and waits 30 seconds after 5 wrong attempts. This keeps people from using the screen, it doesn't protect against someone with access to the device or to Home Assistant.
-
-The physical buttons are in your own configuration, so check the state there:
-
-```yaml
-on_press:
-  - if:
-      condition:
-        lambda: return !id(nspanel).buttons_locked();
-      then:
-        - light.toggle: light1
-```
-
-## Runtime layouts
-
-Add `runtime_layout: true` to change the screensaver and cards without compiling or flashing:
-
-```yaml
-api:
-  custom_services: true
-
-nspanel_lovelace:
-  runtime_layout: true
-```
-
-The device then has a `set_layout` action that takes a JSON layout. It validates the layout, stores it in flash and reboots to apply it, replacing the `screensaver` and `cards` from your configuration. An empty value removes the stored layout, and the device goes back to its configuration. If a stored layout can't be used, the device also falls back to its configuration.
-
-The device reports what it's using with the `esphome.nspanel_lovelace_layout_status` event, so "Allow the device to perform Home Assistant actions" must be on in its ESPHome integration settings. Call `report_layout_status` to ask for it again.
-
-The [NSPanel Lovelace Layout Editor](https://github.com/santibur06/nspanel-lovelace-editor) lets you edit layouts from a sidebar page in Home Assistant. This option requires ESPHome 2025.7.0 or newer.
 
 # Help Needed!
 

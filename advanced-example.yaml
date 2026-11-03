@@ -22,8 +22,8 @@ esp32:
 external_components:
   - source:
       type: git
-      url: https://github.com/olicooper/esphome-nspanel-lovelace-native
-      ref: dev
+      url: https://github.com/santibur06/esphome-nspanel-lovelace-native
+      ref: generic/runtime-layouts
     refresh: 3h
     components: [nspanel_lovelace]
 
@@ -42,7 +42,7 @@ nspanel_lovelace:
     ##   - Spanish/Español: es.json
     ## NOTE: This feature is in beta so the translation keys and values could change at any time!
     ##       Any custom translation files you create will need to be kept in sync with the the files on the repo
-    ##       https://github.com/olicooper/esphome-nspanel-lovelace-native/tree/dev/components/nspanel_lovelace/translations
+    ##       https://github.com/santibur06/esphome-nspanel-lovelace-native/tree/generic/runtime-layouts/components/nspanel_lovelace/translations
     # language: en
     # temperature_unit: celcius
   screensaver:
