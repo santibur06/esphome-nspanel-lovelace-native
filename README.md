@@ -1,6 +1,6 @@
 # ESPHome Native Component for NSPanel: layout editor fork
 
-> **TFT uploads are fixed here.** If `upload_tft` stalls after the first block or leaves your screen on "System data ERROR!", this fork finishes the upload. It has the fixes from upstream [#77](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/77) and [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82), which aren't merged upstream yet. See [Installation](#installation).
+> **TFT uploads are fixed here.** If `upload_tft` stalls after the first block or leaves your screen on "System data ERROR!", this fork finishes the upload. It has the fixes from upstream [#77](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/77) and [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82), which aren't merged upstream yet. See [TFT uploads](#tft-uploads).
 
 This is a fork of [olicooper/esphome-nspanel-lovelace-native](https://github.com/olicooper/esphome-nspanel-lovelace-native). It adds what the [NSPanel Lovelace layout editor](https://github.com/santibur06/nspanel-lovelace-editor) needs to change a panel from Home Assistant, without compiling or flashing:
 
@@ -9,9 +9,13 @@ This is a fork of [olicooper/esphome-nspanel-lovelace-native](https://github.com
 - [Brightness rules](#brightness-rules) by time or from an entity.
 - [Buttons and relays](#buttons-and-relays): the layout decides what each physical button does.
 - [Screen light](#screen-light): the screen's brightness as Home Assistant lights.
-- [TFT uploads that finish](#installation): the fixes from upstream [#77](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/77) and [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82), which aren't merged upstream yet.
+- [TFT uploads that finish](#tft-uploads).
 
-Everything works with the same HMI TFT as upstream, described in [Installation](#installation). The features are on the `generic/runtime-layouts` branch, so point `external_components` at it, as the [basic](basic-example.yaml) and [advanced](advanced-example.yaml) examples do:
+This first part of the page covers what the fork adds. The [upstream documentation](#upstream-documentation) follows it, unchanged, and still applies: installation, configuration, the HMI TFT and known issues.
+
+## Using this fork
+
+Everything works with the same HMI TFT as upstream. The features are on the `generic/runtime-layouts` branch, so point `external_components` at it, as the [basic](basic-example.yaml) and [advanced](advanced-example.yaml) examples do:
 
 ```yaml
 external_components:
@@ -19,45 +23,11 @@ external_components:
     components: [nspanel_lovelace]
 ```
 
-The rest of this page is the upstream documentation, with sections added for these features.
+## TFT uploads
 
-## About the upstream project
+This fork's `upload_tft` has the fixes from upstream [#77](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/77) and [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82). Uploads that stall after the first block, or leave the screen on "System data ERROR!", finish here. After the last block the device waits for the display to restart before rebooting itself, which can take up to 30 seconds.
 
-This project is designed to utilise the UI provided by [NSPanel Lovelace UI](https://github.com/joBr99/nspanel-lovelace-ui), but use a native [ESPHome](https://github.com/esphome/esphome) component for the backend. My core goals for the project were to:
-- Reduce bandwidth consumption - by utilising the efficient TCP communication implemented by ESPHome.
-- Remove the need for an MQTT broker and make the device able to function on a minimal level during network outages.
-- Make the screen more responsive by having the ESP32 do some of the heavy lifting (the ESP32 is actually quite powerful!)
-
-A special thanks goes to these great projects for making this possible:
-- [NSPanel Lovelace UI](https://github.com/joBr99/nspanel-lovelace-ui)
-- [ESPHome NSPanel Lovelace UI](https://github.com/sairon/esphome-nspanel-lovelace-ui)
-- [ESPHome](https://github.com/esphome/esphome)
-
-# Installation
-
-This library only works with the latest minor versions of ESPHome, older versions are not officially supported but may still work.
-
-The installation of ESPHome on the ESP32 follows the standard ESPHome build method e.g. `esphome run --device COM6 basic-example.yaml`. It is possible to do OTA updates with the ESPHome CLI after the initial upload.
-
-For the GUI, this project relies on the HMI TFT firmware from the [ESPHome NSPanel Lovelace UI](https://github.com/sairon/esphome-nspanel-lovelace-ui) project. 
-The firmware version reported by the screen needs to be `52` or `53` for it to be compatible with this project.
-If you don't have the custom HMI TFT firmware installed already you will need to upload the appropriate `nspanel*.tft` file from `v4.3.3` of the project which can be [found here](https://github.com/joBr99/nspanel-lovelace-ui/tree/v4.3.3/HMI). You can upload the correct TFT firmware after installing this component on the ESP32 by using the `upload_tft` service (seen in the [basic example](basic-example.yaml#L64)) exposed by the device in HomeAssistant. Pass it the file's raw URL, for example `https://raw.githubusercontent.com/joBr99/nspanel-lovelace-ui/v4.3.3/HMI/nspanel.tft`.
-
-This fork's TFT upload has the fixes from upstream [#77](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/77) and [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82), which aren't merged upstream yet. Uploads that stall after the first block, or leave the screen on "System data ERROR!", finish here. After the last block the device waits for the display to restart before rebooting itself, which can take up to 30 seconds.
-
-# Configuration
-
-A basic configuration can be found in the [basic example](basic-example.yaml), but you'll probably also want to look at the [advanced example](advanced-example.yaml) which shows the features currently available. This is loosely based on the appdaemon configuration format ([found here](https://github.com/joBr99/nspanel-lovelace-ui/blob/v4.3.3/appdaemon/apps-simple.yaml)) to make it easier to transition to this native ESPHome solution, but please don't expect this to translate exactly as it is not possible to make it work in the exact same way given the limitations of the ESP32.
-
-## PSRAM
-
-The NSPanel has on-board PSRAM which this project makes use of automatically, which means that the `psram` component is unavailable because the PSRAM is configured during code generation by adding specific `sdkconfig_options`. Additionally, when using Arduino (which is deprecated) the PSRAM cannot be used as it is not possible to customise the PSRAM pins for the Arduino framework build.
-
-### Icons
-
-- Icon values can be an icon name or hex value (e.g. `hex:E549`). A list of icons can be found here: https://docs.nspanel.pky.eu/icon-cheatsheet.html
-- Icon colours need to be a 16-bit number (0-65535) representing a `rgb565` colour code. This website can be used to select your colour https://chrishewett.com/blog/true-rgb565-colour-picker/ - then you take the rgb565 hex value and convert it to a number (e.g. `#ce79` -> `52857`).
-
+Pass it the TFT file's raw URL, for example `https://raw.githubusercontent.com/joBr99/nspanel-lovelace-ui/v4.3.3/HMI/nspanel.tft`. Upstream's [Installation](#installation) section explains which TFT you need.
 
 ## Runtime layouts
 
@@ -167,7 +137,49 @@ nspanel_lovelace:
     name: Screensaver
 ```
 
-# Help Needed!
+---
+
+# Upstream documentation
+
+Everything below is [olicooper's README](https://github.com/olicooper/esphome-nspanel-lovelace-native/blob/dev/README.md), unchanged.
+
+## ESPHome Native Component for NSPanel (beta)
+
+This project is designed to utilise the UI provided by [NSPanel Lovelace UI](https://github.com/joBr99/nspanel-lovelace-ui), but use a native [ESPHome](https://github.com/esphome/esphome) component for the backend. My core goals for the project were to:
+- Reduce bandwidth consumption - by utilising the efficient TCP communication implemented by ESPHome.
+- Remove the need for an MQTT broker and make the device able to function on a minimal level during network outages.
+- Make the screen more responsive by having the ESP32 do some of the heavy lifting (the ESP32 is actually quite powerful!)
+
+A special thanks goes to these great projects for making this possible:
+- [NSPanel Lovelace UI](https://github.com/joBr99/nspanel-lovelace-ui)
+- [ESPHome NSPanel Lovelace UI](https://github.com/sairon/esphome-nspanel-lovelace-ui)
+- [ESPHome](https://github.com/esphome/esphome)
+
+## Installation
+
+This library only works with the latest minor versions of ESPHome, older versions are not officially supported but may still work.
+
+The installation of ESPHome on the ESP32 follows the standard ESPHome build method e.g. `esphome run --device COM6 basic-example.yaml`. It is possible to do OTA updates with the ESPHome CLI after the initial upload.
+
+For the GUI, this project relies on the HMI TFT firmware from the [ESPHome NSPanel Lovelace UI](https://github.com/sairon/esphome-nspanel-lovelace-ui) project. 
+The firmware version reported by the screen needs to be `52` or `53` for it to be compatible with this project.
+If you don't have the custom HMI TFT firmware installed already you will need to upload the appropriate `nspanel*.tft` file from `v4.3.3` of the project which can be [found here](https://github.com/joBr99/nspanel-lovelace-ui/tree/v4.3.3/HMI). You can upload the correct TFT firmware after installing this component on the ESP32 by using the `upload_tft` service (seen in the [basic example](basic-example.yaml#L60)) exposed by the device in HomeAssistant.
+
+## Configuration
+
+A basic configuration can be found in the [basic example](basic-example.yaml), but you'll probably also want to look at the [advanced example](advanced-example.yaml) which shows the features currently available. This is loosely based on the appdaemon configuration format ([found here](https://github.com/joBr99/nspanel-lovelace-ui/blob/v4.3.3/appdaemon/apps-simple.yaml)) to make it easier to transition to this native ESPHome solution, but please don't expect this to translate exactly as it is not possible to make it work in the exact same way given the limitations of the ESP32.
+
+### PSRAM
+
+The NSPanel has on-board PSRAM which this project makes use of automatically, which means that the `psram` component is unavailable because the PSRAM is configured during code generation by adding specific `sdkconfig_options`. Additionally, when using Arduino (which is deprecated) the PSRAM cannot be used as it is not possible to customise the PSRAM pins for the Arduino framework build.
+
+#### Icons
+
+- Icon values can be an icon name or hex value (e.g. `hex:E549`). A list of icons can be found here: https://docs.nspanel.pky.eu/icon-cheatsheet.html
+- Icon colours need to be a 16-bit number (0-65535) representing a `rgb565` colour code. This website can be used to select your colour https://chrishewett.com/blog/true-rgb565-colour-picker/ - then you take the rgb565 hex value and convert it to a number (e.g. `#ce79` -> `52857`).
+
+
+## Help Needed!
 
 As much as I love embedded programming, I am unable to dedicate the time required to make this project great without the help of others.
 This is a **beta project** which is not fully functional yet and is subject to change without notice. It has taken a lot of time and effort to get the project to this point and it will take a lot more time to get the project past beta.
@@ -184,9 +196,9 @@ Please see the [HMI readme](https://github.com/joBr99/nspanel-lovelace-ui/tree/m
 
 PRs to expand the functionality or fix bugs are very welcome!
 
-# Known Issues
+## Known Issues
 
-### 1. Weather forecast is not displayed on the screensaver when using Home Assistant 2024.4 or later
+#### 1. Weather forecast is not displayed on the screensaver when using Home Assistant 2024.4 or later
 
 This issue is due to the `forecast` attribute being removed from weather entities. There is currently no alternative way to fetch this data with the current ESPHome functionality but I hope to get this fixed (see [this feature request](https://github.com/esphome/feature-requests/issues/2703)).
 More info on the issue can be [found here](https://github.com/olicooper/esphome-nspanel-lovelace-native/issues/8).
@@ -293,6 +305,6 @@ template:
             {%- endfor %}{{ns.arr}}{% endwith -%}
 ```
 
-# License
+## License
 
 Code in this repository is licensed under the GPLv3 license. Third-party code used in this project have their own license terms. Please see [the license document](LICENSE) for more information.
