@@ -1,4 +1,25 @@
-# ESPHome Native Component for NSPanel (beta)
+# ESPHome Native Component for NSPanel: layout editor fork
+
+This is a fork of [olicooper/esphome-nspanel-lovelace-native](https://github.com/olicooper/esphome-nspanel-lovelace-native). It adds what the [NSPanel Lovelace layout editor](https://github.com/santibur06/nspanel-lovelace-editor) needs to change a panel from Home Assistant, without compiling or flashing:
+
+- [Runtime layouts](#runtime-layouts): the screensaver and cards are sent to the panel and stored there.
+- [Panel settings](#panel-settings): a settings page on the panel, and a PIN lock that the editor can share across every panel.
+- [Brightness rules](#brightness-rules) by time or from an entity.
+- [Buttons and relays](#buttons-and-relays): the layout decides what each physical button does.
+- [Screen light](#screen-light): the screen's brightness as Home Assistant lights.
+- More reliable TFT uploads, also offered upstream in [#82](https://github.com/olicooper/esphome-nspanel-lovelace-native/pull/82).
+
+Everything works with the same HMI TFT as upstream, described in [Installation](#installation). The features are on the `generic/runtime-layouts` branch, so point `external_components` at it:
+
+```yaml
+external_components:
+  - source: github://santibur06/esphome-nspanel-lovelace-native@generic/runtime-layouts
+    components: [nspanel_lovelace]
+```
+
+The rest of this page is the upstream documentation, with sections added for these features.
+
+## About the upstream project
 
 This project is designed to utilise the UI provided by [NSPanel Lovelace UI](https://github.com/joBr99/nspanel-lovelace-ui), but use a native [ESPHome](https://github.com/esphome/esphome) component for the backend. My core goals for the project were to:
 - Reduce bandwidth consumption - by utilising the efficient TCP communication implemented by ESPHome.
@@ -90,6 +111,31 @@ nspanel_lovelace:
     name: Screen
   screensaver_light:
     name: Screensaver
+```
+
+## Panel settings
+
+Every panel gets a settings page unless you set `panel_settings: false`. It works without Home Assistant and has these rows:
+
+- **Lock buttons** stops the physical buttons, no PIN involved. The relays still respond to the screen and Home Assistant.
+- **Brightness** sets the screen's normal brightness.
+- **Screensaver brightness** sets the brightness on the screensaver, from 0 to 100.
+- **Turn screen off** turns the screen off until it's tapped. It needs a screensaver, and models with 4 rows leave it out.
+- **Lock screen** asks for confirmation, then shows a keypad until the PIN is entered. This row only appears once a PIN has been set from Home Assistant.
+
+The button at the top right reboots the panel, after asking for confirmation. With one page on the panel, settings opens from a gear in the right arrow slot. With more pages, the arrows at the ends of the rotation lead to it.
+
+The services are `lock_panel`, `unlock_panel`, `set_lock_pin` (4 to 8 digits, empty removes the PIN and unlocks), `set_lock_pin_hash` (what the layout editor uses to give every panel one PIN), `set_button_lock`, `set_settings_access` (`open`, `pin` or `hidden`) and `set_lock_display` (`keypad` or `screensaver`). `pin` asks for the PIN each time settings is opened. While locked, `keypad` always shows the keypad and the screen stays at its normal brightness. `screensaver` shows the screensaver, a tap brings up the keypad and it goes back after the timeout. Everything survives a reboot. The panel stores a hash of the PIN and waits 30 seconds after 5 wrong attempts. This keeps people from using the screen, it doesn't protect against someone with access to the device or to Home Assistant.
+
+The physical buttons are in your own configuration, so check the state there:
+
+```yaml
+on_press:
+  - if:
+      condition:
+        lambda: return !id(nspanel).buttons_locked();
+      then:
+        - light.toggle: light1
 ```
 
 ## Runtime layouts
@@ -239,28 +285,3 @@ template:
 # License
 
 Code in this repository is licensed under the GPLv3 license. Third-party code used in this project have their own license terms. Please see [the license document](LICENSE) for more information.
-
-## Panel settings
-
-Every panel gets a settings page unless you set `panel_settings: false`. It works without Home Assistant and has these rows:
-
-- **Lock buttons** stops the physical buttons, no PIN involved. The relays still respond to the screen and Home Assistant.
-- **Brightness** sets the screen's normal brightness.
-- **Screensaver brightness** sets the brightness on the screensaver, from 0 to 100.
-- **Turn screen off** turns the screen off until it's tapped. It needs a screensaver, and models with 4 rows leave it out.
-- **Lock screen** asks for confirmation, then shows a keypad until the PIN is entered. This row only appears once a PIN has been set from Home Assistant.
-
-The button at the top right reboots the panel, after asking for confirmation. With one page on the panel, settings opens from a gear in the right arrow slot. With more pages, the arrows at the ends of the rotation lead to it.
-
-The services are `lock_panel`, `unlock_panel`, `set_lock_pin` (4 to 8 digits, empty removes the PIN and unlocks), `set_lock_pin_hash` (what the layout editor uses to give every panel one PIN), `set_button_lock`, `set_settings_access` (`open`, `pin` or `hidden`) and `set_lock_display` (`keypad` or `screensaver`). `pin` asks for the PIN each time settings is opened. While locked, `keypad` always shows the keypad and the screen stays at its normal brightness. `screensaver` shows the screensaver, a tap brings up the keypad and it goes back after the timeout. Everything survives a reboot. The panel stores a hash of the PIN and waits 30 seconds after 5 wrong attempts. This keeps people from using the screen, it doesn't protect against someone with access to the device or to Home Assistant.
-
-The physical buttons are in your own configuration, so check the state there:
-
-```yaml
-on_press:
-  - if:
-      condition:
-        lambda: return !id(nspanel).buttons_locked();
-      then:
-        - light.toggle: light1
-```
